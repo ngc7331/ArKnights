@@ -37,7 +37,7 @@ class Ark(QWidget):
         self._tray_icon = QSystemTrayIcon(self)
         tray_icon_menu = QMenu(self)
         obj_list = {
-            '鼠标锁定': [None, self.MouseLock],
+            '鼠标锁定': ['resources/icon/locked.svg' if self.mouse_locked else 'resources/icon/unlocked.svg', self.MouseLock],
             '设置': ['resources/icon/setting.svg', self.show],
             '重载': ['resources/icon/reload.svg', self.Reload],
             '退出': ['resources/icon/quit.svg', self.Quit]
@@ -59,11 +59,8 @@ class Ark(QWidget):
             self.knights.append(Knight(self, knight))
 
     def MouseLock(self):
-        if (self.mouse_locked):
-            self._menu_action['鼠标锁定'].setIcon(QIcon())
-        else:
-            self._menu_action['鼠标锁定'].setIcon(QIcon('resources/icon/checked.svg'))
         self.mouse_locked = not self.mouse_locked
+        self._menu_action['鼠标锁定'].setIcon(QIcon('resources/icon/locked.svg' if self.mouse_locked else 'resources/icon/unlocked.svg'))
         for knight in self.knights:
             knight.mouse_locked = self.mouse_locked
 
