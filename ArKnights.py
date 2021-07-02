@@ -50,7 +50,7 @@ class Ark(QWidget):
         self._tray_icon.setIcon(QIcon('resources/favicon.ico'))
         self._tray_icon.setContextMenu(tray_icon_menu)
 
-    def InitKnights(self):
+    def InitKnights(self) -> None:
         self.knights = []
         for knight in list(self.conf['knights'].keys()):
             if (not self.conf['knights'][knight]['enabled']):
@@ -58,30 +58,28 @@ class Ark(QWidget):
             logging.info('Create %s' % knight)
             self.knights.append(Knight(self, knight))
 
-    def MouseLock(self):
+    def MouseLock(self) -> None:
         self.mouse_locked = not self.mouse_locked
         self._menu_action['鼠标锁定'].setIcon(QIcon('resources/icon/locked.svg' if self.mouse_locked else 'resources/icon/unlocked.svg'))
-        for knight in self.knights:
-            knight.mouse_locked = self.mouse_locked
 
-    def Reload(self):
+    def Reload(self) -> None:
         for knight in self.knights:
             logging.info('Stop %s' % knight.name)
             knight.Quit()
         self.InitKnights()
 
-    def Quit(self):
+    def Quit(self) -> None:
         self.should_close = True
         for knight in self.knights:
             knight.close()
         self.close()
         sys.exit()
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0: QtGui.QCloseEvent) -> None:
         if (self.should_close):
-            event.accept()
+            a0.accept()
         else:
-            event.ignore()
+            a0.ignore()
             self.hide()
 
 class Knight(QWidget):
@@ -93,7 +91,6 @@ class Knight(QWidget):
         self.stat_rec = ['Idle', 'Idle']
         self.InitModel()
         self.following_mouse = False
-        self.mouse_locked = ark.mouse_locked
         self.mouse_pos = self.pos()
         self.InitTimer()
         self.show()
@@ -164,9 +161,7 @@ class Knight(QWidget):
                 if (hit_wall):
                     self.heading = 1 - self.heading
                 else:
-                    if (self.stat_rec[1] != 'Move'):
-                        self.heading = random.randint(0, 1)
-                    elif (random.randint(0,100) > 80):
+                    if (self.stat_rec[1] != 'Move' or random.randint(0,100) > 80):
                         self.heading = random.randint(0, 1)
         self.i = 0
         self.playing = True
@@ -189,7 +184,7 @@ class Knight(QWidget):
         self.i += self.conf['fps']/self.fps
 
     def mousePressEvent(self, a0: QtGui.QMouseEvent) -> None:
-        if (a0.button() == Qt.LeftButton and not self.mouse_locked):
+        if (a0.button() == Qt.LeftButton and not ark.mouse_locked):
             self.following_mouse = True
             self.mouse_pos = a0.globalPos() - self.pos()
             self.setCursor(QCursor(Qt.OpenHandCursor))
@@ -225,7 +220,15 @@ if __name__ == "__main__":
             'knights': {
                 'FrostNova': {
                     'init_pos': [screenRect.width()-256, screenRect.height()-256], #[x, y]
-                    'size': [256, 256] #[x, y]
+                    'size': [256, 256], #[x, y]
+                    'enabled': True,
+                    'fps': 60
+                },
+                "Amiya": {
+                    "init_pos": [0, screenRect.height()-256],
+                    "size": [256, 256],
+                    "enabled": False,
+                    "fps": 60
                 }
             },
             'mouse_locked': True
