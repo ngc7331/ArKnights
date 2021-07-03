@@ -10,7 +10,7 @@ from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 from PyQt5 import QtWidgets, QtGui
 
-REQUIERD_CONF_VERSION = '0.1a'
+REQUIERD_CONF_VERSION = '0.1c'
 
 if (not os.path.exists('log')):
     os.mkdir('log')
@@ -37,10 +37,11 @@ class Ark(QWidget):
         if (conf['version'] != REQUIERD_CONF_VERSION):
             self.RaiseError(
                 '错误：配置文件版本不正确',
-                '[Error] Ark:\n需求版本：%s\n实际版本：%s\n您可以尝试删除目录下的conf.json以使得程序自动生成新的配置文件' % (REQUIERD_CONF_VERSION, conf['version']),
+                '[Error] Ark:\n需求版本：%s\n实际版本：%s\n您可以尝试删除目录下的config.json以使得程序自动生成新的配置文件\n您亦可尝试点击忽略此问题（可能会遇到问题）' %
+                (REQUIERD_CONF_VERSION, conf['version']),
                 'warning'
             )
-            logger.error('Ark: Mismatched config file version: %s ~ %s' % (REQUIERD_CONF_VERSION, conf['version']))
+            logger.error('Ark: Mismatched config file version: %s (%s required)' % (conf['version'], REQUIERD_CONF_VERSION))
         self._error = False
         self.InitWindow()
         self.InitTrayIcon()
@@ -52,7 +53,7 @@ class Ark(QWidget):
         '''TODO 初始化设置界面'''
         self.setWindowTitle('ArKnights - 设置')
         self.resize(300, 300)
-        txt = QLabel('！本页面仍在开发中！')
+        txt = QLabel('本页面仍在开发中！')
         btn_close = QPushButton('关闭')
         btn_close.clicked.connect(self.hide)
         btn_test = QPushButton('退出')
@@ -135,7 +136,7 @@ class Ark(QWidget):
     def About(self) -> None:
         title = '关于'
         text = '''
-ArKnights: 基于PyQt5编写的明日方舟方舟桌宠
+ArKnights: 基于PyQt5编写的明日方舟桌宠
 模型素材来源于https://prts.wiki/，其版权属于上海鹰角网络科技有限公司
 这只是一个学习PyQt5过程中的一个练手之作，我菜的要死，请轻喷
 本项目开源于https://github.com/ngc7331/ArKnights
@@ -169,15 +170,15 @@ ArKnights: 基于PyQt5编写的明日方舟方舟桌宠
         logger.info('Stop Knights')
         for knight_name in list(self.knights.keys()):
             self.StopKnight(knight_name)
-        #保存conf.json
+        #保存config.json
         logger.info('Save config')
-        with open('./conf.json', 'w') as f:
+        self.conf['mouse_locked'] = self.mouse_locked
+        with open('./config.json', 'w') as f:
             f.write(json.dumps(self.conf, ensure_ascii = False, indent = 4, separators=(',', ': ')))
         #关闭Ark
         logger.info('Stop Ark')
         self.should_close = True
         self.close()
-        sys.exit()
 
     def closeEvent(self, a0: QCloseEvent) -> None:
         '''重写closeEvent，避免错误关闭'''
@@ -197,11 +198,11 @@ class Knight(QWidget):
             self.InitModel()
         except FileNotFoundError as e:
             logger.error('resources/model/%s not found, please check!' % self.name, exc_info=True)
-            ark.RaiseError('错误：文件未找到', '[Error] %s:\n%s' % (self.name, e), 'warning')
-            ark._error = True
+            self.ark.RaiseError('错误：文件未找到', '[Error] %s:\n%s' % (self.name, e), 'warning')
+            self.ark._error = True
             self.close()
-        self.following_mouse = False
-        self.mouse_pos = self.pos()
+        self._following_mouse = False
+        self._mouse_pos = self.pos()
         self.InitTimer()
         self.show()
 
@@ -243,7 +244,32 @@ class Knight(QWidget):
             if (action not in self.model.keys()):
                 self.model[action] = []
             self.model[action].append(LoadImage(os.path.join(model_dir, self.name, img)))
+        #验证读取并记录点击事件列表
+        self.click_actions = []
+        for action in self.conf['action'].keys():
+            if (action not in self.model.keys()):
+                logger.error('resources/model/%s empty, please check!' % self.name)
+                self.ark.RaiseError(
+                    '错误：文件未找到', '[Error] %s:\nresources/model/%s下未找到%s动作资源' %
+                    (self.name, self.name, action),
+                    'warning'
+                )
+                self.ark._error = True
+                self.close()
+            elif (len(self.model[action]) != self.conf['action'][action]):
+                logger.warning(
+                    '%s: There should be %d frames of action [%s], there are actually %d' %
+                    (self.name, self.conf['action'][action], action, len(self.model[action]))
+                )
+                self.ark.RaiseError(
+                    '警告：资源不完整', '[Warn] %s:\nresources/model/%s下%s动作资源应有%d帧，实际读取了%d帧' %
+                    (self.name, self.name, action, self.conf['action'][action], len(self.model[action])),
+                    'warning'
+                )
+            if (action.startswith('Click')):
+                self.click_actions.append(action)
         #初始化模型相关变量
+        logger.debug('%s: Click actions=%s' % (self.name, self.click_actions))
         self.stat = 'Idle'
         self.i = 0
         self.heading = 0 # 0=Right, 1=Left
@@ -265,8 +291,8 @@ class Knight(QWidget):
         '''
         self.stat_rec = [self.stat_rec[1], self.stat]
         rand = random.randint(0, 100)
-        logger.debug('%s: rand=%s hit_wall=%s click=%s stat_rec=%s' % (self.name, rand, hit_wall, self.stat=='Click', self.stat_rec))
-        if (rand > 80 or hit_wall or self.stat == 'Click'):
+        logger.debug('%s: rand=%s hit_wall=%s click=%s stat_rec=%s' % (self.name, rand, hit_wall, self.stat.startswith('Click'), self.stat_rec))
+        if (rand > 80 or hit_wall or self.stat.startswith('Click')):
             if (self.stat_rec[0] != 'Move' and self.stat_rec[1] == 'Move' and hit_wall):
                 self.stat = 'Move'
             else:
@@ -287,7 +313,7 @@ class Knight(QWidget):
         if (not self.playing):
             self.RandomAction()
         elif (self.i >= len(self.model[self.stat])):
-            if (self.round >= 180/len(self.model[self.stat]) or self.stat == 'Click'):
+            if (self.round >= 180/len(self.model[self.stat]) or self.stat.startswith('Click')):
                 self.RandomAction()
             else:
                 self.i = 0
@@ -308,58 +334,71 @@ class Knight(QWidget):
     '''重写鼠标相关Event实现拖动效果'''
     def mousePressEvent(self, a0: QMouseEvent) -> None:
         if (a0.button() == Qt.LeftButton and not ark.mouse_locked):
-            self.following_mouse = True
-            self.mouse_pos = a0.globalPos() - self.pos()
+            self._following_mouse = True
+            self._mouse_pos = a0.globalPos() - self.pos()
             self.setCursor(QCursor(Qt.OpenHandCursor))
             a0.accept()
     def mouseMoveEvent(self, a0: QMouseEvent) -> None:
-        if (self.following_mouse):
-            self.move(a0.globalPos() - self.mouse_pos)
+        if (self._following_mouse):
+            self.move(a0.globalPos() - self._mouse_pos)
             a0.accept()
     def mouseReleaseEvent(self, a0: QMouseEvent) -> None:
-        self.following_mouse = False
+        self._following_mouse = False
         self.setCursor(QCursor(Qt.ArrowCursor))
 
     def mouseDoubleClickEvent(self, a0: QMouseEvent) -> None:
         '''重写mouseDoubleClickEvent实现相应双击交互'''
         if (a0.button() == Qt.LeftButton):
-            if ('Click' not in self.model.keys()):
+            if (not self.click_actions):
                 logger.warning('%s: Click anim not found' % self.name)
                 return None
-            if (self.stat == 'Click'):
+            if (self.stat.startswith('Click')):
                 return None
-            logger.debug('%s: %s -> Click' % (self.name, self.stat))
-            self.stat = 'Click'
+            action = random.choice(self.click_actions)
+            logger.debug('%s: %s -> %s' % (self.name, self.stat, action))
+            self.stat = action
             self.i = 0
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     try:
-        with open('./conf.json', 'r') as f:
+        with open('./config.json', 'r') as f:
             conf = json.load(f)
     except FileNotFoundError:
+        logger.info('config.json not found, created')
         screenRect = QApplication.desktop().screenGeometry()
         conf = {
             'version': REQUIERD_CONF_VERSION,
             'fps': 60,
             'knights': {
-                'FrostNova': {
+                'FrostNova_1': {
                     'init_pos': [screenRect.width()-256, screenRect.height()-256], #[x, y]
                     'size': [256, 256], #[x, y]
+                    'action': {'Idle': 180, 'Move': 180, 'Click': 180},
                     'enabled': True,
                     'fps': 60
                 },
-                "Amiya": {
+                "Amiya_test1": {
                     "init_pos": [0, screenRect.height()-256],
                     "size": [256, 256],
+                    'action': {'Idle': 60, 'Move': 68, 'Clicks': 810, 'Clickn': 60},
+                    "enabled": False,
+                    "fps": 60
+                },
+                "W_epoque7": {
+                    "init_pos": [int((screenRect.width()-256)/2), screenRect.height()-256],
+                    "size": [256, 256],
+                    'action': {'Idle': 360, 'Move': 80, 'Clicks': 2440, 'Clickn': 120},
                     "enabled": False,
                     "fps": 60
                 }
             },
-            'mouse_locked': True
+            'mouse_locked': True,
+            'logging_level': logging.INFO
         }
-        with open('./conf.json', 'w') as f:
+        with open('./config.json', 'w') as f:
             f.write(json.dumps(conf, ensure_ascii = False, indent = 4, separators=(',', ': ')))
     logger.info(conf)
+    filehandler.setLevel(conf['logging_level'])
     ark = Ark(conf)
     sys.exit(app.exec_())

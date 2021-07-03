@@ -8,3 +8,4 @@ ArKnights.spec
 __pycache__
 build
 dist
+config.json
