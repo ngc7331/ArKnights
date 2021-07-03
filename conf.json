@@ -1,4 +1,5 @@
 {
+    "version": "0.1a",
     "fps": 60,
     "knights": {
         "FrostNova": {

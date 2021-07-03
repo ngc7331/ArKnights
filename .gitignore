@@ -3,3 +3,8 @@
 resources/model_build
 ArKnights.exe
 venv
+log
+ArKnights.spec
+__pycache__
+build
+dist

@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import json
+import time
 import random
 import logging
 from PyQt5.QtGui import *
@@ -9,13 +10,40 @@ from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 from PyQt5 import QtWidgets, QtGui
 
+REQUIERD_CONF_VERSION = '0.1a'
+
+if (not os.path.exists('log')):
+    os.mkdir('log')
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s")
+consolehandler = logging.StreamHandler()
+consolehandler.setLevel(logging.DEBUG)
+consolehandler.setFormatter(formatter)
+logfile = os.path.join('log', '%s.log' % time.strftime('%Y%m%d%H%M', time.localtime(time.time())))
+filehandler = logging.FileHandler(logfile, 'w')
+filehandler.setLevel(logging.INFO)
+filehandler.setFormatter(formatter)
+logger.addHandler(consolehandler)
+logger.addHandler(filehandler)
+
 class Ark(QWidget):
     def __init__(self, conf:dict):
         super().__init__()
         self.conf = conf
         self.mouse_locked = self.conf['mouse_locked']
+        global REQUIERD_CONF_VERSION
+        if (conf['version'] != REQUIERD_CONF_VERSION):
+            self.RaiseError(
+                '错误：配置文件版本不正确',
+                '[Error] Ark:\n需求版本：%s\n实际版本：%s\n您可以尝试删除目录下的conf.json以使得程序自动生成新的配置文件' % (REQUIERD_CONF_VERSION, conf['version']),
+                'warning'
+            )
+            logger.error('Ark: Mismatched config file version: %s ~ %s' % (REQUIERD_CONF_VERSION, conf['version']))
+        self.error = False
         self.InitWindow()
         self.InitTrayIcon()
+        self.knights = {}
         self.InitKnights()
         self._tray_icon.show()
 
@@ -51,27 +79,47 @@ class Ark(QWidget):
         self._tray_icon.setContextMenu(tray_icon_menu)
 
     def InitKnights(self) -> None:
-        self.knights = []
-        for knight in list(self.conf['knights'].keys()):
-            if (not self.conf['knights'][knight]['enabled']):
+        for knight_name, knight_conf in self.conf['knights'].items():
+            if (not knight_conf['enabled']):
                 continue
-            logging.info('Create %s' % knight)
-            self.knights.append(Knight(self, knight))
+            logger.info('Create %s' % knight_name)
+            knight = Knight(self, knight_name)
+            if (self.error):
+                logger.warning('Create %s failed' % knight_name)
+            else:
+                self.knights[knight_name] = knight
+        logger.info('Created knights: %s' % self.knights)
+
+    def RaiseError(self, title: str, text: str, type: str) -> None:
+        box = QMessageBox()
+        if (type == 'warning'):
+            choice = box.warning(self, title, text, QMessageBox.Ignore|QMessageBox.Abort)
+        elif (type == 'critical'):
+            choice = box.critical(self, title, text, QMessageBox.Abort)
+        else:
+            choice = box.information(self, title, text, QMessageBox.Yes)
+        if (choice == QMessageBox.Abort):
+            logger.critical('An error occurred, user abort.')
+            self.Quit()
 
     def MouseLock(self) -> None:
         self.mouse_locked = not self.mouse_locked
         self._menu_action['鼠标锁定'].setIcon(QIcon('resources/icon/locked.svg' if self.mouse_locked else 'resources/icon/unlocked.svg'))
 
     def Reload(self) -> None:
-        for knight in self.knights:
-            logging.info('Stop %s' % knight.name)
-            knight.Quit()
+        for knight in list(self.knights.values()):
+            logger.info('Stop %s' % knight.name)
+            knight.close()
+            self.knights.pop(knight.name)
         self.InitKnights()
 
     def Quit(self) -> None:
         self.should_close = True
-        for knight in self.knights:
+        for knight in list(self.knights.values()):
+            logger.info('Stop %s' % knight.name)
             knight.close()
+            self.knights.pop(knight.name)
+        logger.info('Stop Ark')
         self.close()
         sys.exit()
 
@@ -89,7 +137,13 @@ class Knight(QWidget):
         self.InitWindow()
         self.InitModelHolder()
         self.stat_rec = ['Idle', 'Idle']
-        self.InitModel()
+        try:
+            self.InitModel()
+        except FileNotFoundError as e:
+            logger.error('resources/model/%s not found, please check!' % self.name, exc_info=True)
+            ark.RaiseError('错误：文件未找到', '[Error] %s:\n%s' % (self.name, e), 'warning')
+            ark.error = True
+            self.close()
         self.following_mouse = False
         self.mouse_pos = self.pos()
         self.InitTimer()
@@ -118,23 +172,19 @@ class Knight(QWidget):
             img = img.scaled(self.size())
             return img
         self.model = {}
-        root_dir = 'resources/model'
-        dir_list = os.listdir(root_dir)
+        model_dir = 'resources/model'
+        dir_list = os.listdir(model_dir)
         for dir in dir_list:
-            if (not os.path.isdir(os.path.join(root_dir, dir))):
+            if (not os.path.isdir(os.path.join(model_dir, dir))):
                 dir_list.remove(dir)
-        if (self.name not in dir_list):
-            logging.error('resources/model/%s not found, please check!' % self.name)
-            logging.warning('Using %s instead.' % dir_list[0])
-            self.name = dir_list[0]
-        img_list = os.listdir(os.path.join(root_dir, self.name))
+        img_list = os.listdir(os.path.join(model_dir, self.name))
         for img in img_list:
             if (not img.endswith('.png')):
                 continue
             action = re.match(r'(\D*)', img).group(1)
             if (action not in self.model.keys()):
                 self.model[action] = []
-            self.model[action].append(LoadImage(os.path.join(root_dir, self.name, img)))
+            self.model[action].append(LoadImage(os.path.join(model_dir, self.name, img)))
         self.stat = 'Idle'
         self.i = 0
         self.real_i = 0
@@ -149,13 +199,13 @@ class Knight(QWidget):
     def RandomAction(self, hit_wall: bool = False):
         self.stat_rec = [self.stat_rec[1], self.stat]
         rand = random.randint(0,100)
-        logging.debug('%s: rand=%s hit_wall=%s' % (self.name, rand, hit_wall))
+        logger.debug('%s: rand=%s hit_wall=%s click=%s' % (self.name, rand, hit_wall, self.stat=='Click'))
         if (rand > 80 or hit_wall or self.stat == 'Click'):
             if (self.stat_rec[0] == 'Idle' and self.stat_rec[1] == 'Move' and hit_wall):
-                logging.debug('%s: Force change status to Move' % self.name)
+                logger.debug('%s: Force change status to Move' % self.name)
                 self.stat = 'Move'
             else:
-                logging.debug('%s: Randomly change status' % self.name)
+                logger.debug('%s: Randomly change status' % self.name)
                 self.stat = ['Idle', 'Move'][random.randint(0, 1)]
             if (self.stat == 'Move'):
                 if (hit_wall):
@@ -163,6 +213,7 @@ class Knight(QWidget):
                 else:
                     if (self.stat_rec[1] != 'Move' or random.randint(0,100) > 80):
                         self.heading = random.randint(0, 1)
+            logger.debug('%s: %s -> %s, heading=%s' % (self.name, self.stat_rec[1], self.stat, 'Left' if self.heading else 'Right'))
         self.i = 0
         self.playing = True
 
@@ -170,13 +221,13 @@ class Knight(QWidget):
         if (not self.playing or self.i >= len(self.model[self.stat])):
             self.RandomAction()
         frame = self.model[self.stat][int(self.i)]
-        logging.debug('%s: %5s %5s %5s' % (self.name, self.stat, int(self.i), ['Right', 'Left'][self.heading]))
+        #logger.debug('%s: %5s %5s %5s' % (self.name, self.stat, int(self.i), ['Right', 'Left'][self.heading]))
         if (self.stat == 'Move'):
             screenRect = QApplication.desktop().screenGeometry()
             x = self.pos().x()
             x += 2 * (0.5-self.heading)
             if ((x<=0 and self.heading == 1) or (x>=screenRect.width()-self.size().width() and self.heading == 0)):
-                logging.info('%s Hit Wall' % self.name)
+                logger.info('%s Hit Wall' % self.name)
                 self.RandomAction(hit_wall = True)
                 return None
             self.move(x, self.pos().y())
@@ -199,23 +250,23 @@ class Knight(QWidget):
     def mouseDoubleClickEvent(self, a0: QtGui.QMouseEvent) -> None:
         if (a0.button() == Qt.LeftButton):
             if ('Click' not in self.model.keys()):
-                logging.warning('%s: Click anim not found' % self.name)
+                logger.warning('%s: Click anim not found' % self.name)
                 return None
+            if (self.stat == 'Click'):
+                return None
+            logger.debug('%s: %s -> Click' % (self.name, self.stat))
             self.stat = 'Click'
             self.i = 0
 
-    def Quit(self):
-        self.close()
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    logging.basicConfig(level=logging.INFO)
     try:
         with open('./conf.json', 'r') as f:
             conf = json.load(f)
     except FileNotFoundError:
         screenRect = QApplication.desktop().screenGeometry()
         conf = {
+            'version': REQUIERD_CONF_VERSION,
             'fps': 60,
             'knights': {
                 'FrostNova': {
@@ -235,6 +286,6 @@ if __name__ == "__main__":
         }
         with open('./conf.json', 'w') as f:
             f.write(json.dumps(conf, ensure_ascii = False, indent = 4, separators=(',', ': ')))
-    logging.info(conf)
+    logger.info(conf)
     ark = Ark(conf)
     sys.exit(app.exec_())
