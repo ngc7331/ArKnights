@@ -30,6 +30,7 @@ logger.addHandler(filehandler)
 class Ark(QWidget):
     def __init__(self, conf: dict):
         super().__init__()
+        self.should_close = False
         self.conf = conf
         self.mouse_locked = self.conf['mouse_locked']
         global REQUIERD_CONF_VERSION
@@ -50,15 +51,16 @@ class Ark(QWidget):
     def InitWindow(self) -> None:
         '''TODO 初始化设置界面'''
         self.setWindowTitle('ArKnights - 设置')
-        self.resize(200, 200)
-        self.should_close = False
-        self.btn_close = QPushButton('关闭')
-        self.btn_close.clicked.connect(self.hide)
-        self.btn_test = QPushButton('退出')
-        self.btn_test.clicked.connect(self.Quit)
+        self.resize(300, 300)
+        txt = QLabel('！本页面仍在开发中！')
+        btn_close = QPushButton('关闭')
+        btn_close.clicked.connect(self.hide)
+        btn_test = QPushButton('退出')
+        btn_test.clicked.connect(self.Quit)
         layout = QVBoxLayout()
-        layout.addWidget(self.btn_test)
-        layout.addWidget(self.btn_close)
+        layout.addWidget(txt)
+        layout.addWidget(btn_test)
+        layout.addWidget(btn_close)
         self.setLayout(layout)
 
     def InitTrayIcon(self) -> None:
@@ -79,6 +81,8 @@ class Ark(QWidget):
             '鼠标锁定': ['resources/icon/locked.svg' if self.mouse_locked else 'resources/icon/unlocked.svg', self.MouseLock],
             '设置': ['resources/icon/setting.svg', self.show],
             '重载': ['resources/icon/reload.svg', self.Reload],
+            '关于': ['resources/icon/about.svg', self.About],
+            '关于Qt': ['resources/icon/about.svg', self.AboutQt],
             '退出': ['resources/icon/quit.svg', self.Quit]
         }
         for obj in obj_list.keys():
@@ -122,6 +126,29 @@ class Ark(QWidget):
         self.mouse_locked = not self.mouse_locked
         self._menu_action['鼠标锁定'].setIcon(QIcon('resources/icon/locked.svg' if self.mouse_locked else 'resources/icon/unlocked.svg'))
 
+    def Reload(self) -> None:
+        '''处理菜单栏-重载的点击事件，关闭并根据self.conf重新打开所有Knights'''
+        for knight_name in list(self.knights.keys()):
+            self.StopKnight(knight_name)
+        self.UpdateKnights()
+
+    def About(self) -> None:
+        title = '关于'
+        text = '''
+ArKnights: 基于PyQt5编写的明日方舟方舟桌宠
+模型素材来源于https://prts.wiki/，其版权属于上海鹰角网络科技有限公司
+这只是一个学习PyQt5过程中的一个练手之作，我菜的要死，请轻喷
+本项目开源于https://github.com/ngc7331/ArKnights
+如果您有兴趣，欢迎issue及PR
+        '''
+        box = QMessageBox()
+        box.about(self, title, text)
+        box.show() # 没整明白，不加这一行会导致程序直接退出（本程序依赖此bug运行，勿删.jpg）
+    def AboutQt(self) -> None:
+        box = QMessageBox()
+        box.aboutQt(self, 'About Qt')
+        box.show() # 没整明白，不加这一行会导致程序直接退出（本程序依赖此bug运行，勿删.jpg）
+
     def RaiseError(self, title: str, text: str, type: str) -> None:
         '''弹窗提示错误'''
         box = QMessageBox()
@@ -131,15 +158,10 @@ class Ark(QWidget):
             choice = box.critical(self, title, text, QMessageBox.Abort)
         else:
             choice = box.information(self, title, text, QMessageBox.Yes)
+        box.show()
         if (choice == QMessageBox.Abort):
             logger.critical('An error occurred, user abort.')
             self.Quit()
-
-    def Reload(self) -> None:
-        '''关闭并根据self.conf重新打开所有Knights'''
-        for knight_name in list(self.knights.keys()):
-            self.StopKnight(knight_name)
-        self.UpdateKnights()
 
     def Quit(self) -> None:
         '''退出程序'''
@@ -242,18 +264,18 @@ class Knight(QWidget):
                         -> 撞墙   -> 走向屏幕内
         '''
         self.stat_rec = [self.stat_rec[1], self.stat]
-        rand = random.randint(0,100)
+        rand = random.randint(0, 100)
         logger.debug('%s: rand=%s hit_wall=%s click=%s stat_rec=%s' % (self.name, rand, hit_wall, self.stat=='Click', self.stat_rec))
         if (rand > 80 or hit_wall or self.stat == 'Click'):
-            if (self.stat_rec[0] == 'Idle' and self.stat_rec[1] == 'Move' and hit_wall):
+            if (self.stat_rec[0] != 'Move' and self.stat_rec[1] == 'Move' and hit_wall):
                 self.stat = 'Move'
             else:
                 self.stat = ['Idle', 'Move'][random.randint(0, 1)]
             if (self.stat == 'Move'):
                 if (hit_wall):
-                    self.heading = 0 if self.pos().x()<=0 else 1
+                    self.heading = 0 if self.pos().x()<=1 else 1
                 else:
-                    if (self.stat_rec[1] != 'Move' or random.randint(0,100) > 80):
+                    if (self.stat_rec[1] != 'Move' or random.randint(0, 100) > 80):
                         self.heading = random.randint(0, 1)
             logger.debug('%s: %s -> %s, heading=%s' % (self.name, self.stat_rec[1], self.stat, 'Left' if self.heading else 'Right'))
         self.i = 0
