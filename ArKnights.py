@@ -10,7 +10,8 @@ from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 from PyQt5 import QtWidgets, QtGui
 
-REQUIERD_CONF_VERSION = '0.1c'
+REQUIRED_CONF_VERSION = '0.1d'
+REQUIRED_ACTION = ['Idle', 'Move']
 
 if (not os.path.exists('log')):
     os.mkdir('log')
@@ -33,19 +34,19 @@ class Ark(QWidget):
         self.should_close = False
         self.conf = conf
         self.mouse_locked = self.conf['mouse_locked']
-        global REQUIERD_CONF_VERSION
-        if (conf['version'] != REQUIERD_CONF_VERSION):
+        self.knights = {}
+        global REQUIRED_CONF_VERSION
+        if (conf['version'] != REQUIRED_CONF_VERSION):
             self.RaiseError(
                 '错误：配置文件版本不正确',
                 '[Error] Ark:\n需求版本：%s\n实际版本：%s\n您可以尝试删除目录下的config.json以使得程序自动生成新的配置文件\n您亦可尝试点击忽略此问题（可能会遇到问题）' %
-                (REQUIERD_CONF_VERSION, conf['version']),
+                (REQUIRED_CONF_VERSION, conf['version']),
                 'warning'
             )
-            logger.error('Ark: Mismatched config file version: %s (%s required)' % (conf['version'], REQUIERD_CONF_VERSION))
+            logger.error('Ark: Mismatched config file version: %s (%s required)' % (conf['version'], REQUIRED_CONF_VERSION))
         self._error = False
         self.InitWindow()
         self.InitTrayIcon()
-        self.knights = {}
         self.UpdateKnights()
         self._tray_icon.show()
 
@@ -179,6 +180,7 @@ ArKnights: 基于PyQt5编写的明日方舟桌宠
         logger.info('Stop Ark')
         self.should_close = True
         self.close()
+        sys.exit()
 
     def closeEvent(self, a0: QCloseEvent) -> None:
         '''重写closeEvent，避免错误关闭'''
@@ -199,6 +201,11 @@ class Knight(QWidget):
         except FileNotFoundError as e:
             logger.error('resources/model/%s not found, please check!' % self.name, exc_info=True)
             self.ark.RaiseError('错误：文件未找到', '[Error] %s:\n%s' % (self.name, e), 'warning')
+            self.ark._error = True
+            self.close()
+        except KeyError as e:
+            logger.error('%s: KeyError' % self.name, exc_info=True)
+            self.ark.RaiseError('错误：字典键错误', '[Error] %s:\n%s\n这可能是配置文件不正确导致的' % (self.name, e), 'warning')
             self.ark._error = True
             self.close()
         self._following_mouse = False
@@ -232,10 +239,6 @@ class Knight(QWidget):
         #导入模型文件
         self.model = {}
         model_dir = 'resources/model'
-        dir_list = os.listdir(model_dir)
-        for dir in dir_list:
-            if (not os.path.isdir(os.path.join(model_dir, dir))):
-                dir_list.remove(dir)
         img_list = os.listdir(os.path.join(model_dir, self.name))
         for img in img_list:
             if (not img.endswith('.png')):
@@ -245,31 +248,44 @@ class Knight(QWidget):
                 self.model[action] = []
             self.model[action].append(LoadImage(os.path.join(model_dir, self.name, img)))
         #验证读取并记录点击事件列表
-        self.click_actions = []
-        for action in self.conf['action'].keys():
+        self.action_list = {'click': [], 'normal': []}
+        for action in self.conf['frames'].keys():
             if (action not in self.model.keys()):
                 logger.error('resources/model/%s empty, please check!' % self.name)
                 self.ark.RaiseError(
-                    '错误：文件未找到', '[Error] %s:\nresources/model/%s下未找到%s动作资源' %
+                    '错误：文件未找到', '[Error] %s:\nresources/model/%s下未找到%s动作资源。' %
                     (self.name, self.name, action),
                     'warning'
                 )
                 self.ark._error = True
                 self.close()
-            elif (len(self.model[action]) != self.conf['action'][action]):
+            elif (len(self.model[action]) != self.conf['frames'][action]):
                 logger.warning(
                     '%s: There should be %d frames of action [%s], there are actually %d' %
-                    (self.name, self.conf['action'][action], action, len(self.model[action]))
+                    (self.name, self.conf['frames'][action], action, len(self.model[action]))
                 )
                 self.ark.RaiseError(
                     '警告：资源不完整', '[Warn] %s:\nresources/model/%s下%s动作资源应有%d帧，实际读取了%d帧' %
-                    (self.name, self.name, action, self.conf['action'][action], len(self.model[action])),
+                    (self.name, self.name, action, self.conf['frames'][action], len(self.model[action])),
                     'warning'
                 )
             if (action.startswith('Click')):
-                self.click_actions.append(action)
+                self.action_list['click'].extend([action] * self.conf['weight'][action])
+            else:
+                self.action_list['normal'].extend([action] * self.conf['weight'][action])
+        #验证所需动作
+        for action in REQUIRED_ACTION:
+            if (action not in self.model.keys()):
+                logger.error('%s: action %s is required, but not found' % (self.name, action))
+                self.ark.RaiseError(
+                    '错误：文件未找到', '[Error] %s:\n未能成功读取%s动作资源，该动作是必需的' %
+                    (self.name, self.name, action),
+                    'error'
+                )
+                self.ark._error = True
+                self.close()
         #初始化模型相关变量
-        logger.debug('%s: Click actions=%s' % (self.name, self.click_actions))
+        logger.debug('%s: Click actions=%s' % (self.name, self.action_list['click']))
         self.stat = 'Idle'
         self.i = 0
         self.heading = 0 # 0=Right, 1=Left
@@ -296,7 +312,7 @@ class Knight(QWidget):
             if (self.stat_rec[0] != 'Move' and self.stat_rec[1] == 'Move' and hit_wall):
                 self.stat = 'Move'
             else:
-                self.stat = ['Idle', 'Move'][random.randint(0, 1)]
+                self.stat = random.choice(self.action_list['normal'])
             if (self.stat == 'Move'):
                 if (hit_wall):
                     self.heading = 0 if self.pos().x()<=1 else 1
@@ -349,12 +365,12 @@ class Knight(QWidget):
     def mouseDoubleClickEvent(self, a0: QMouseEvent) -> None:
         '''重写mouseDoubleClickEvent实现相应双击交互'''
         if (a0.button() == Qt.LeftButton):
-            if (not self.click_actions):
+            if (not self.action_list['click']):
                 logger.warning('%s: Click anim not found' % self.name)
                 return None
             if (self.stat.startswith('Click')):
                 return None
-            action = random.choice(self.click_actions)
+            action = random.choice(self.action_list['click'])
             logger.debug('%s: %s -> %s' % (self.name, self.stat, action))
             self.stat = action
             self.i = 0
@@ -368,27 +384,38 @@ if __name__ == "__main__":
         logger.info('config.json not found, created')
         screenRect = QApplication.desktop().screenGeometry()
         conf = {
-            'version': REQUIERD_CONF_VERSION,
+            'version': REQUIRED_CONF_VERSION,
             'fps': 60,
             'knights': {
                 'FrostNova_1': {
                     'init_pos': [screenRect.width()-256, screenRect.height()-256], #[x, y]
                     'size': [256, 256], #[x, y]
-                    'action': {'Idle': 180, 'Move': 180, 'Click': 180},
+                    'frames': {'Idle': 180, 'Move': 180, 'Click': 180},
+                    'weight': {'Idle': 1, 'Move': 1, 'Click': 1},
+                    'enabled': False,
+                    'fps': 60
+                },
+                'FrostNova_2': {
+                    'init_pos': [screenRect.width()-256, screenRect.height()-256],
+                    'size': [256, 256],
+                    'frames': {'Idle': 240, 'Move': 96, 'Clickn': 96, 'Clicka': 180, 'Clicks': 220},
+                    'weight': {'Idle': 1, 'Move': 1, 'Clickn': 2, 'Clicka': 2, 'Clicks': 1},
                     'enabled': True,
                     'fps': 60
                 },
                 "Amiya_test1": {
                     "init_pos": [0, screenRect.height()-256],
                     "size": [256, 256],
-                    'action': {'Idle': 60, 'Move': 68, 'Clicks': 810, 'Clickn': 60},
+                    'frames': {'Idle': 60, 'Move': 68, 'Clicks': 810, 'Clickn': 60},
+                    'weight': {'Idle': 1, 'Move': 1, 'Clicks': 1, 'Clickn': 4},
                     "enabled": False,
                     "fps": 60
                 },
                 "W_epoque7": {
                     "init_pos": [int((screenRect.width()-256)/2), screenRect.height()-256],
                     "size": [256, 256],
-                    'action': {'Idle': 360, 'Move': 80, 'Clicks': 2440, 'Clickn': 120},
+                    'frames': {'Idle': 360, 'Move': 80, 'Clicks': 2440, 'Clickn': 120},
+                    'weight': {'Idle': 1, 'Move': 1, 'Clicks': 1, 'Clickn': 4},
                     "enabled": False,
                     "fps": 60
                 }
