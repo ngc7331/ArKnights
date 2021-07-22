@@ -1,5 +1,4 @@
 import os
-import re
 import sys
 import json
 import time
@@ -29,26 +28,83 @@ logger.addHandler(consolehandler)
 logger.addHandler(filehandler)
 
 class Ark(QWidget):
-    def __init__(self, conf: dict):
+    def __init__(self):
         super().__init__()
+        self.LoadConfig()
         self.should_close = False
-        self.conf = conf
         self.mouse_locked = self.conf['mouse_locked']
         self.knights = {}
         global REQUIRED_CONF_VERSION
-        if (conf['version'] != REQUIRED_CONF_VERSION):
+        if (self.conf['version'] != REQUIRED_CONF_VERSION):
             self.RaiseError(
                 '错误：配置文件版本不正确',
                 '[Error] Ark:\n需求版本：%s\n实际版本：%s\n您可以尝试删除目录下的config.json以使得程序自动生成新的配置文件\n您亦可尝试点击忽略此问题（可能会遇到问题）' %
-                (REQUIRED_CONF_VERSION, conf['version']),
+                (REQUIRED_CONF_VERSION, self.conf['version']),
                 'warning'
             )
-            logger.error('Ark: Mismatched config file version: %s (%s required)' % (conf['version'], REQUIRED_CONF_VERSION))
+            logger.error('Ark: Mismatched config file version: %s (%s required)' % (self.conf['version'], REQUIRED_CONF_VERSION))
         self._error = False
         self.InitWindow()
         self.InitTrayIcon()
         self.UpdateKnights()
         self._tray_icon.show()
+
+    def LoadConfig(self) -> None:
+        try:
+            with open('./config.json', 'r') as f:
+                conf = json.load(f)
+        except FileNotFoundError:
+            logger.info('config.json not found, created')
+            conf = self.GenerateConfigFile()
+        logger.info(conf)
+        filehandler.setLevel(conf['logging_level'])
+        self.conf = conf
+
+    def GenerateConfigFile(self) -> dict:
+        screenRect = QApplication.desktop().screenGeometry()
+        conf = {
+            'version': REQUIRED_CONF_VERSION,
+            'fps': 60,
+            'knights': {
+                'FrostNova_1': {
+                    'init_pos': [screenRect.width()-256, screenRect.height()-256], #[x, y]
+                    'size': [256, 256], #[x, y]
+                    'frames': {'Idle': 180, 'Move': 180, 'Click': 180},
+                    'weight': {'Idle': 1, 'Move': 1, 'Click': 1},
+                    'enabled': False,
+                    'fps': 60
+                },
+                'FrostNova_2': {
+                    'init_pos': [screenRect.width()-256, screenRect.height()-256],
+                    'size': [256, 256],
+                    'frames': {'Idle': 240, 'Move': 96, 'Clickn': 96, 'Clicka': 180, 'Clicks': 220},
+                    'weight': {'Idle': 1, 'Move': 1, 'Clickn': 2, 'Clicka': 2, 'Clicks': 1},
+                    'enabled': True,
+                    'fps': 60
+                },
+                "Amiya_test1": {
+                    "init_pos": [0, screenRect.height()-256],
+                    "size": [256, 256],
+                    'frames': {'Idle': 60, 'Move': 68, 'Clicks': 810, 'Clickn': 60},
+                    'weight': {'Idle': 1, 'Move': 1, 'Clicks': 1, 'Clickn': 4},
+                    "enabled": False,
+                    "fps": 60
+                },
+                "W_epoque7": {
+                    "init_pos": [int((screenRect.width()-256)/2), screenRect.height()-256],
+                    "size": [256, 256],
+                    'frames': {'Idle': 360, 'Move': 80, 'Clicks': 2440, 'Clickn': 120},
+                    'weight': {'Idle': 1, 'Move': 1, 'Clicks': 1, 'Clickn': 4},
+                    "enabled": False,
+                    "fps": 60
+                }
+            },
+            'mouse_locked': True,
+            'logging_level': logging.INFO
+        }
+        with open('./config.json', 'w') as f:
+            f.write(json.dumps(conf, ensure_ascii = False, indent = 4, separators=(',', ': ')))
+        return conf
 
     def InitWindow(self) -> None:
         '''TODO 初始化设置界面'''
@@ -132,6 +188,7 @@ class Ark(QWidget):
         '''处理菜单栏-重载的点击事件，关闭并根据self.conf重新打开所有Knights'''
         for knight_name in list(self.knights.keys()):
             self.StopKnight(knight_name)
+        self.LoadConfig()
         self.UpdateKnights()
 
     def About(self) -> None:
@@ -229,61 +286,51 @@ class Knight(QWidget):
             '''从imgpath读取图像，返回缩放后的QImage'''
             img = QImage()
             img.load(imgpath)
-            img = img.scaled(self.size())
+            if(img.isNull()):
+                return False
+            img = img.scaled(self.size(), Qt.KeepAspectRatio)
             return img
         #初始化QLabel
         self.holder = QLabel(self)
-        img = QImage()
-        img.load('resources/Loading.png')
-        self.holder.setPixmap(QPixmap.fromImage(img))
+        self.holder.setPixmap(QPixmap.fromImage(LoadImage('resources/Loading.png')))
         #导入模型文件
-        self.model = {}
-        model_dir = 'resources/model'
-        img_list = os.listdir(os.path.join(model_dir, self.name))
-        for img in img_list:
-            if (not img.endswith('.png')):
-                continue
-            action = re.match(r'(\D*)', img).group(1)
-            if (action not in self.model.keys()):
-                self.model[action] = []
-            self.model[action].append(LoadImage(os.path.join(model_dir, self.name, img)))
-        #验证读取并记录点击事件列表
+        self.model = dict.fromkeys(self.conf['frames'].keys(), [])
         self.action_list = {'click': [], 'normal': []}
+        model_dir = 'resources/model/%s' % self.name
         for action in self.conf['frames'].keys():
-            if (action not in self.model.keys()):
-                logger.error('resources/model/%s empty, please check!' % self.name)
-                self.ark.RaiseError(
-                    '错误：文件未找到', '[Error] %s:\nresources/model/%s下未找到%s动作资源。' %
-                    (self.name, self.name, action),
-                    'warning'
-                )
-                self.ark._error = True
-                self.close()
-            elif (len(self.model[action]) != self.conf['frames'][action]):
+            frames = self.conf['frames'][action]
+            #载入图像
+            b = len(str(frames))
+            for i in range(0, frames):
+                i_str = '{i:0>{b}d}'.format(i=i, b=b)
+                filepath = os.path.join(model_dir, '%s%s.png'%(action, i_str))
+                img = LoadImage(filepath)
+                if (img):
+                    self.model[action] = self.model[action] + [img]
+                else:
+                    logger.warning('%s not found, please check!' % filepath)
+                    self.ark.RaiseError(
+                        '警告：文件未找到', '[Error] %s:\n文件%s未找到，请检查' %
+                        (self.name, filepath),
+                        'warning'
+                    )
+                print(sys.getsizeof(self.model))
+            #校验
+            if (len(self.model[action]) != frames):
                 logger.warning(
                     '%s: There should be %d frames of action [%s], there are actually %d' %
                     (self.name, self.conf['frames'][action], action, len(self.model[action]))
                 )
                 self.ark.RaiseError(
-                    '警告：资源不完整', '[Warn] %s:\nresources/model/%s下%s动作资源应有%d帧，实际读取了%d帧' %
+                    '警告：资源不完整', '[Warn] %s:\nresources/model/%s下[%s]动作资源应有%d帧，实际读取了%d帧' %
                     (self.name, self.name, action, self.conf['frames'][action], len(self.model[action])),
                     'warning'
                 )
+            #分类
             if (action.startswith('Click')):
                 self.action_list['click'].extend([action] * self.conf['weight'][action])
             else:
                 self.action_list['normal'].extend([action] * self.conf['weight'][action])
-        #验证所需动作
-        for action in REQUIRED_ACTION:
-            if (action not in self.model.keys()):
-                logger.error('%s: action %s is required, but not found' % (self.name, action))
-                self.ark.RaiseError(
-                    '错误：文件未找到', '[Error] %s:\n未能成功读取%s动作资源，该动作是必需的' %
-                    (self.name, self.name, action),
-                    'error'
-                )
-                self.ark._error = True
-                self.close()
         #初始化模型相关变量
         logger.debug('%s: Click actions=%s' % (self.name, self.action_list['click']))
         self.stat = 'Idle'
@@ -360,7 +407,8 @@ class Knight(QWidget):
             a0.accept()
     def mouseReleaseEvent(self, a0: QMouseEvent) -> None:
         self._following_mouse = False
-        self.setCursor(QCursor(Qt.ArrowCursor))
+        self.unsetCursor()
+        a0.accept()
 
     def mouseDoubleClickEvent(self, a0: QMouseEvent) -> None:
         '''重写mouseDoubleClickEvent实现相应双击交互'''
@@ -374,58 +422,9 @@ class Knight(QWidget):
             logger.debug('%s: %s -> %s' % (self.name, self.stat, action))
             self.stat = action
             self.i = 0
+            a0.accept()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    try:
-        with open('./config.json', 'r') as f:
-            conf = json.load(f)
-    except FileNotFoundError:
-        logger.info('config.json not found, created')
-        screenRect = QApplication.desktop().screenGeometry()
-        conf = {
-            'version': REQUIRED_CONF_VERSION,
-            'fps': 60,
-            'knights': {
-                'FrostNova_1': {
-                    'init_pos': [screenRect.width()-256, screenRect.height()-256], #[x, y]
-                    'size': [256, 256], #[x, y]
-                    'frames': {'Idle': 180, 'Move': 180, 'Click': 180},
-                    'weight': {'Idle': 1, 'Move': 1, 'Click': 1},
-                    'enabled': False,
-                    'fps': 60
-                },
-                'FrostNova_2': {
-                    'init_pos': [screenRect.width()-256, screenRect.height()-256],
-                    'size': [256, 256],
-                    'frames': {'Idle': 240, 'Move': 96, 'Clickn': 96, 'Clicka': 180, 'Clicks': 220},
-                    'weight': {'Idle': 1, 'Move': 1, 'Clickn': 2, 'Clicka': 2, 'Clicks': 1},
-                    'enabled': True,
-                    'fps': 60
-                },
-                "Amiya_test1": {
-                    "init_pos": [0, screenRect.height()-256],
-                    "size": [256, 256],
-                    'frames': {'Idle': 60, 'Move': 68, 'Clicks': 810, 'Clickn': 60},
-                    'weight': {'Idle': 1, 'Move': 1, 'Clicks': 1, 'Clickn': 4},
-                    "enabled": False,
-                    "fps": 60
-                },
-                "W_epoque7": {
-                    "init_pos": [int((screenRect.width()-256)/2), screenRect.height()-256],
-                    "size": [256, 256],
-                    'frames': {'Idle': 360, 'Move': 80, 'Clicks': 2440, 'Clickn': 120},
-                    'weight': {'Idle': 1, 'Move': 1, 'Clicks': 1, 'Clickn': 4},
-                    "enabled": False,
-                    "fps": 60
-                }
-            },
-            'mouse_locked': True,
-            'logging_level': logging.INFO
-        }
-        with open('./config.json', 'w') as f:
-            f.write(json.dumps(conf, ensure_ascii = False, indent = 4, separators=(',', ': ')))
-    logger.info(conf)
-    filehandler.setLevel(conf['logging_level'])
-    ark = Ark(conf)
+    ark = Ark()
     sys.exit(app.exec_())

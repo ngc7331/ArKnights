@@ -10,3 +10,5 @@ build
 dist
 config.json
 *.old
+test.py
+test.txt
