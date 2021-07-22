@@ -4,7 +4,7 @@ from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 from modules import REQUIRED_ACTION, REQUIRED_CONF_VERSION
-from modules import logger
+from modules.logger import logger
 from modules.config import LoadConfig
 from modules.Knight import Knight
 

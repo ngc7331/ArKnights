@@ -3,7 +3,7 @@ import random
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
-from modules import logger
+from modules.logger import logger
 
 class Knight(QWidget):
     def __init__(self, ark, name: str):

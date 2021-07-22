@@ -2,7 +2,7 @@ import json
 import logging
 from PyQt5.QtWidgets import QApplication
 from modules import REQUIRED_CONF_VERSION
-from modules import logger
+from modules.logger import logger
 
 def GenerateConfigFile() -> dict:
     screenRect = QApplication.desktop().screenGeometry()

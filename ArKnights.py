@@ -1,4 +1,8 @@
-from modules.run import run
+import sys
+from modules.Ark import Ark
+from PyQt5.QtWidgets import QApplication
 
 if __name__ == '__main__':
-    run()
+    app = QApplication(sys.argv)
+    ark = Ark()
+    sys.exit(app.exec_())
