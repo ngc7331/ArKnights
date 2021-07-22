@@ -15,7 +15,6 @@ class Ark(QWidget):
         self.should_close = False
         self.mouse_locked = self.conf['mouse_locked']
         self.knights = {}
-        global REQUIRED_CONF_VERSION
         if (self.conf['version'] != REQUIRED_CONF_VERSION):
             self.RaiseError(
                 '错误：配置文件版本不正确',

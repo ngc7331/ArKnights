@@ -23,12 +23,15 @@ jobs:
       shell: cmd
     - name: Make package
       run: pyinstaller -F .\ArKnights.py -w
-    - name: Move package
-      run: mv dist/ArKnights.exe .
-    - name: Upload artifact
-      uses: actions/upload-artifact@v2.1.4
+    - name: Upload artifact - exe
+      uses: actions/upload-artifact@v2
       with:
-        name: ArKnights
-        path: |
-          ArKnights.exe
-          resources/
+        name: ArKnights.exe
+        path: dist/ArKnights.exe
+    - name: Pack resources
+      run: tar -cvf resources.tar.gz resources
+    - name: Upload artifact - resources
+      uses: actions/upload-artifact@v2
+      with:
+        name: resources.tar.gz
+        path: resources.tar.gz

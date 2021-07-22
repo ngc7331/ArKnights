@@ -7,7 +7,26 @@
 
 ## 使用方法
 ### Windows x64 .exe
-1. 在[Github Actions](https://github.com/ngc7331/ArKnights/actions)的Artifacts中下载打包好的文件，解压运行
+1. 在[Github Actions](https://github.com/ngc7331/ArKnights/actions)的Artifacts中下载打包好的文件
+2. 解压文件并将它们按如下目录结构保存，其中ArKnights.exe、resources可在Artifacts中分别下载
+```
+├── ArKnights.exe
+├── config.json (自动生成)
+├── logs (自动生成)
+└── resources
+    ├── favicon.ico
+    ├── ...
+    ├── icon
+    │   ├── quit.svg
+    │   └── ...
+    └── model
+        ├── FrostNova_1 (仅作示例，应与您的config.json中配置保持一致)
+        │   ├── Click000.png
+        │   └── ...
+        └── ... (更多图片文件夹，应与您的config.json中配置保持一致)
+            └── ... (图片文件)
+```
+3. 运行`ArKnights.exe`
 ### 源码
 1. Clone本仓库，安装python3运行环境
 2. 使用`pip install -r requirements.txt`安装依赖
